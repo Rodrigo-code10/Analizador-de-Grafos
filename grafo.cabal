@@ -6,7 +6,7 @@ build-type:         Simple
 executable grafo-espectral
     main-is:          Main.hs
     hs-source-dirs:   app, src
-    other-modules:    Types, Matrix, Laplacian, Components, Rank, Dot
+    other-modules:    Types, Matrix, Laplacian, Components, Rank, Dot, Consenso
     build-depends:    base >=4.18 && <5
     default-language: Haskell2010
     ghc-options:      -Wall
