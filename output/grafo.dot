@@ -1,24 +1,22 @@
 graph G {
-  node [shape=circle];
+  node [shape=circle, style=filled, fontcolor=white];
   subgraph cluster_0 {
-    label="Componente 1";
-    color=blue;
-    node [color=blue];
-    edge [color=blue];
-    0;
-    1;
-    2;
+    label="Componente 1 (armonizada)";
+    color=green;
+    penwidth=3;
+    0 [fillcolor="#3350cc", label="0\n20.0"];
+    1 [fillcolor="#3350cc", label="1\n20.0"];
+    2 [fillcolor="#3350cc", label="2\n20.0"];
     0 -- 1;
     0 -- 2;
     1 -- 2;
   }
   subgraph cluster_1 {
-    label="Componente 2";
-    color=red;
-    node [color=red];
-    edge [color=red];
-    3;
-    4;
+    label="Componente 2 (armonizada)";
+    color=green;
+    penwidth=3;
+    3 [fillcolor="#7f5080", label="3\n50.0"];
+    4 [fillcolor="#80507f", label="4\n50.0"];
     3 -- 4;
   }
 }
