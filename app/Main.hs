@@ -73,4 +73,6 @@ main = do
     (["analizar"], Right (a, x, fs)) -> putStr (informe a fs x)
     (["paso"], Right (a, x, fs))     ->
       putStr (informe a fs (pasoFijo (epsilonSeguro a) (laplaciana a) fs x))
-    _ -> putStrLn "ERROR Comando desconocido. Usa: analizar | paso"
+    (["dot"], Right (a, x, _))       ->
+      putStr (generarDotEstado tolerancia a (componentes a) x)
+    _ -> putStrLn "ERROR Comando desconocido. Usa: analizar | paso | dot"
