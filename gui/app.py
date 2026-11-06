@@ -1,4 +1,5 @@
 import random
+import shutil
 import subprocess
 import time
 import tkinter as tk
@@ -41,14 +42,25 @@ def ruta_binario():
 
 BINARIO = ruta_binario()
 
+def construir_entrada(matriz, puntajes, fijos):
+    return (f"{len(matriz)}\n"
+            + "\n".join(" ".join(map(str, f)) for f in matriz) + "\n"
+            + " ".join(f"{p:.6f}" for p in puntajes) + "\n"
+            + " ".join("1" if f else "0" for f in fijos) + "\n")
+
 def llamar(comando, matriz, puntajes, fijos):
-    entrada = (f"{len(matriz)}\n"
-               + "\n".join(" ".join(map(str, f)) for f in matriz) + "\n"
-               + " ".join(f"{p:.6f}" for p in puntajes) + "\n"
-               + " ".join("1" if f else "0" for f in fijos) + "\n")
-    r = subprocess.run([BINARIO, comando], input=entrada,
+    r = subprocess.run([BINARIO, comando],
+                       input=construir_entrada(matriz, puntajes, fijos),
                        capture_output=True, text=True)
     return interpretar(r.stdout)
+
+def obtener_dot(matriz, puntajes, fijos):
+    r = subprocess.run([BINARIO, "dot"],
+                       input=construir_entrada(matriz, puntajes, fijos),
+                       capture_output=True, text=True)
+    if r.stdout.startswith("ERROR"):
+        raise ValueError(r.stdout[6:].strip())
+    return r.stdout
 
 def interpretar(texto):
     if texto.startswith("ERROR"):
@@ -351,6 +363,7 @@ class Juego:
         self.canvas.bind("<Motion>", self.al_pasar)
         self.canvas.bind("<Leave>", lambda e: self.poner_hover(None))
         raiz.bind("<space>", lambda e: self.alternar_auto())
+        raiz.bind("<Control-e>", lambda e: self.exportar())
         raiz.bind("<F11>", lambda e: self.alternar_pantalla_completa())
         raiz.bind("<Escape>", lambda e: self.salir_pantalla_completa())
 
@@ -415,10 +428,13 @@ class Juego:
 
         fila2 = tk.Frame(p, bg=SUPERFICIE)
         fila2.pack(fill="x", padx=16, pady=(8, 0))
-        Boton(fila2, "Aleatorio", self.aleatorizar).pack(
-            side="left", expand=True, fill="x", padx=(0, 4))
-        Boton(fila2, "Cargar", self.cargar_archivo).pack(
-            side="left", expand=True, fill="x", padx=(4, 0))
+        pequena = (FUENTE, 9, "bold")
+        Boton(fila2, "Aleatorio", self.aleatorizar, fuente=pequena).pack(
+            side="left", expand=True, fill="x", padx=(0, 3))
+        Boton(fila2, "Cargar", self.cargar_archivo, fuente=pequena).pack(
+            side="left", expand=True, fill="x", padx=3)
+        Boton(fila2, "Exportar", self.exportar, color="#2f6f55", fuente=pequena).pack(
+            side="left", expand=True, fill="x", padx=(3, 0))
 
         # Velocidad
         cab = tk.Frame(p, bg=SUPERFICIE)
@@ -599,8 +615,8 @@ class Juego:
             self.datos[clave].set(valor)
 
         ok = i["verificacion"]
-        self.verif.set("✔  n − rango = componentes" if ok
-                       else "✘  n − rango ≠ componentes", VERDE if ok else ROJO)
+        self.verif.set("n − rango = componentes" if ok
+                       else " n − rango ≠ componentes", VERDE if ok else ROJO)
         self.desarm.config(text=f"Desarmonía actual: {i['desarmonia']:.4f}")
 
         h = self.hover
@@ -732,6 +748,33 @@ class Juego:
         self.detener_auto()
         self.fijos[i] = not self.fijos[i]
         self.nueva_perturbacion()
+
+    # Exportar el estado actual a output/grafo.dot y output/grafo.png
+    def exportar(self):
+        try:
+            dot = obtener_dot(self.matriz, self.puntajes, self.fijos)
+        except ValueError as e:
+            messagebox.showerror("No se pudo exportar", str(e))
+            return
+        carpeta = RAIZ / "output"
+        carpeta.mkdir(exist_ok=True)
+        ruta_dot, ruta_png = carpeta / "grafo.dot", carpeta / "grafo.png"
+        ruta_dot.write_text(dot)
+
+        if shutil.which("dot") is None:
+            messagebox.showinfo(
+                "DOT exportado",
+                f"Archivo guardado:\n{ruta_dot}\n\n"
+                "Para generar la imagen instala Graphviz:\n"
+                "sudo apt install graphviz")
+            return
+        r = subprocess.run(["dot", "-Tpng", str(ruta_dot), "-o", str(ruta_png)],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            messagebox.showerror("Error de Graphviz", r.stderr or "dot falló")
+        else:
+            messagebox.showinfo("Exportado",
+                                f"Archivos guardados:\n{ruta_dot}\n{ruta_png}")
 
     # Botones
     def reiniciar(self):
