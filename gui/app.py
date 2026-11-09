@@ -32,6 +32,17 @@ ROJO = "#e5566d"
 BOTON = "#2b3152"
 
 FUENTE = "Helvetica"
+FUENTE_MONO = "Courier"
+
+# Matrices de ejemplo para la ventana de análisis
+EJEMPLOS = {
+    "Original": "5\n0 1 1 0 0\n1 0 1 0 0\n1 1 0 0 0\n0 0 0 0 1\n0 0 0 1 0",
+    "Camino P5": "5\n0 1 0 0 0\n1 0 1 0 0\n0 1 0 1 0\n0 0 1 0 1\n0 0 0 1 0",
+    "Anillo C6": "6\n0 1 0 0 0 1\n1 0 1 0 0 0\n0 1 0 1 0 0\n0 0 1 0 1 0\n0 0 0 1 0 1\n1 0 0 0 1 0",
+    "Estrella": "5\n0 1 1 1 1\n1 0 0 0 0\n1 0 0 0 0\n1 0 0 0 0\n1 0 0 0 0",
+    "Completo K5": "5\n0 1 1 1 1\n1 0 1 1 1\n1 1 0 1 1\n1 1 1 0 1\n1 1 1 1 0",
+    "Dos triángulos": "6\n0 1 1 0 0 0\n1 0 1 0 0 0\n1 1 0 0 0 0\n0 0 0 0 1 1\n0 0 0 1 0 1\n0 0 0 1 1 0",
+}
 
 
 # Comunicación directa con HAskell
@@ -61,6 +72,32 @@ def obtener_dot(matriz, puntajes, fijos):
     if r.stdout.startswith("ERROR"):
         raise ValueError(r.stdout[6:].strip())
     return r.stdout
+
+def llamar_espectro(matriz, puntajes, fijos):
+    r = subprocess.run([BINARIO, "espectro"],
+                       input=construir_entrada(matriz, puntajes, fijos),
+                       capture_output=True, text=True)
+    return interpretar_espectro(r.stdout)
+
+def interpretar_espectro(texto):
+    if texto.startswith("ERROR"):
+        raise ValueError(texto[6:].strip())
+    datos = {"A": [], "D": [], "L": [], "comp": []}
+    for linea in texto.strip().splitlines():
+        clave, _, valor = linea.partition(" ")
+        if clave in ("A", "D", "L"):
+            datos[clave].append(valor.split())
+        elif clave == "comp":
+            datos["comp"].append([int(v) for v in valor.split()])
+        elif clave == "autovalores":
+            datos[clave] = [float(v) for v in valor.split()]
+        elif clave in ("conexo", "regular", "filasuman0", "espectral_ok", "verificacion"):
+            datos[clave] = valor == "True"
+        elif clave in ("suma", "lambda2", "lambdamax", "densidad", "epsilon", "contraccion"):
+            datos[clave] = float(valor)
+        else:
+            datos[clave] = int(valor)
+    return datos
 
 def interpretar(texto):
     if texto.startswith("ERROR"):
@@ -106,6 +143,18 @@ def leer_grafo(texto):
         if len(p) == n:
             puntajes = p
     return matriz, puntajes or puntajes_por_defecto(n)
+
+def texto_a_grafo(texto):
+    # La primera línea con n es opcional
+    lineas = [l for l in texto.strip().splitlines() if l.strip()]
+    if not lineas:
+        raise ValueError("Escribe una matriz.")
+    if len(lineas[0].split()) != 1 or len(lineas) == 1:
+        lineas.insert(0, str(len(lineas)))
+    try:
+        return leer_grafo("\n".join(lineas))
+    except ValueError:
+        raise ValueError("Usa solo números (0 y 1) separados por espacios.")
 
 # Solo para efectos visuales
 def hex_a_rgb(h):
@@ -334,6 +383,166 @@ class InfoNodo(tk.Canvas):
                              font=(FUENTE, 9), width=w - 28)
 
 
+class VentanaAnalisis(tk.Toplevel):
+    # Ventana para escribir la matriz y ver el análisis espectral
+    def __init__(self, juego):
+        super().__init__(juego.raiz)
+        self.juego = juego
+        self.title("Matriz y análisis espectral")
+        self.configure(bg=SUPERFICIE)
+        self.geometry("1060x720")
+        self.minsize(880, 600)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        izq = tk.Frame(self, bg=SUPERFICIE, width=340)
+        izq.grid(row=0, column=0, sticky="ns")
+        izq.pack_propagate(False)
+
+        tk.Label(izq, text="Matriz", bg=SUPERFICIE, fg=TEXTO,
+                 font=(FUENTE, 20, "bold")).pack(anchor="w", padx=18, pady=(18, 0))
+        tk.Label(izq, text="Escribe o pega la matriz de adyacencia", bg=SUPERFICIE,
+                 fg=TENUE, font=(FUENTE, 9)).pack(anchor="w", padx=18, pady=(0, 10))
+
+        self.editor = tk.Text(izq, height=11, bg=TARJETA, fg=TEXTO,
+                              insertbackground="white", relief="flat",
+                              font=(FUENTE_MONO, 12), padx=10, pady=8, undo=True,
+                              wrap="none", highlightthickness=1,
+                              highlightbackground=BORDE, highlightcolor=ACENTO)
+        self.editor.pack(fill="x", padx=16)
+        tk.Label(izq, text="Una fila por línea, valores separados por espacios.\n"
+                           "La primera línea con n es opcional.",
+                 bg=SUPERFICIE, fg=TENUE, font=(FUENTE, 8),
+                 justify="left").pack(anchor="w", padx=18, pady=(4, 0))
+
+        self.mensaje = Pastilla(izq, 56, punto=True)
+        self.mensaje.pack(fill="x", padx=16, pady=(12, 10))
+        Boton(izq, "Analizar y aplicar", self.aplicar, ACENTO, alto=44,
+              fuente=(FUENTE, 11, "bold")).pack(fill="x", padx=16)
+        Boton(izq, "Exportar reporte", self.exportar_reporte, "#2f6f55").pack(
+            fill="x", padx=16, pady=(8, 0))
+
+        tk.Label(izq, text="EJEMPLOS", bg=SUPERFICIE, fg=TENUE,
+                 font=(FUENTE, 8, "bold")).pack(anchor="w", padx=18, pady=(16, 5))
+        rejilla = tk.Frame(izq, bg=SUPERFICIE)
+        rejilla.pack(fill="x", padx=14)
+        for k, (nombre, texto) in enumerate(EJEMPLOS.items()):
+            Boton(rejilla, nombre, lambda t=texto: self.cargar_ejemplo(t), alto=34,
+                  fuente=(FUENTE, 9, "bold")).grid(row=k // 2, column=k % 2,
+                                                   padx=2, pady=2, sticky="ew")
+            rejilla.grid_columnconfigure(k % 2, weight=1, uniform="e")
+
+        self.reporte = tk.Text(self, bg=FONDO, fg=TEXTO, relief="flat",
+                               font=(FUENTE_MONO, 11), padx=22, pady=18, wrap="none",
+                               highlightthickness=0, cursor="arrow", state="disabled")
+        self.reporte.grid(row=0, column=1, sticky="nsew")
+        self.reporte.tag_configure("titulo", foreground=ACENTO, font=(FUENTE_MONO, 11, "bold"))
+        self.reporte.tag_configure("ok", foreground=VERDE)
+        self.reporte.tag_configure("mal", foreground=ROJO)
+        self.reporte.tag_configure("tenue", foreground=TENUE)
+        self.reporte.tag_configure("cero", foreground="#59607f")
+        self.mostrar()
+
+    def poner_matriz(self, matriz):
+        self.editor.delete("1.0", "end")
+        self.editor.insert("1.0", f"{len(matriz)}\n"
+                           + "\n".join(" ".join(map(str, f)) for f in matriz))
+
+    # Pide el análisis a Haskell con el grafo actual del juego
+    def mostrar(self):
+        j = self.juego
+        self.poner_matriz(j.matriz)
+        try:
+            datos = llamar_espectro(j.matriz, j.puntajes, j.fijos)
+        except ValueError as e:
+            self.mensaje.set(str(e), ROJO)
+            return
+        self.render(datos)
+        self.mensaje.set("Análisis calculado por Haskell. El grafo del juego usa esta matriz.", ACENTO)
+
+    def aplicar(self, cerrar=True):
+        try:
+            matriz, puntajes = texto_a_grafo(self.editor.get("1.0", "end"))
+            self.juego.cargar(matriz, puntajes)
+        except (ValueError, IndexError) as e:
+            self.mensaje.set(str(e), ROJO)
+            return
+        if cerrar:
+            self.destroy()
+
+    def cargar_ejemplo(self, texto):
+        self.editor.delete("1.0", "end")
+        self.editor.insert("1.0", texto)
+        self.aplicar(cerrar=False)
+
+    def exportar_reporte(self):
+        carpeta = RAIZ / "output"
+        carpeta.mkdir(exist_ok=True)
+        ruta = carpeta / "reporte.txt"
+        ruta.write_text("ANALIZADOR ESPECTRAL DE GRAFOS Y MATRIZ LAPLACIANA\n\n"
+                        + self.reporte.get("1.0", "end"), encoding="utf-8")
+        messagebox.showinfo("Reporte exportado", f"Archivo guardado:\n{ruta}", parent=self)
+
+    def escribir(self, texto, etiqueta=None):
+        self.reporte.insert("end", texto, (etiqueta,) if etiqueta else ())
+
+    def marca(self, ok):
+        self.escribir(" ✔️" if ok else " ❌")
+
+    def tabla(self, filas):
+        ancho = max(len(v) for f in filas for v in f) + 1
+        for f in filas:
+            self.escribir("   ")
+            for v in f:
+                self.escribir(v.rjust(ancho), "cero" if v == "0" else None)
+            self.escribir("\n")
+
+    def render(self, d):
+        n, aristas = d["nodos"], d["aristas"]
+        self.reporte.config(state="normal")
+        self.reporte.delete("1.0", "end")
+
+        self.escribir("MATRIZ DE ADYACENCIA  A\n", "titulo")
+        self.tabla(d["A"])
+        self.escribir("\nMATRIZ DE GRADOS  D\n", "titulo")
+        self.tabla(d["D"])
+        self.escribir("\nMATRIZ LAPLACIANA  L = D − A\n", "titulo")
+        self.tabla(d["L"])
+        self.escribir("   cada fila suma 0")
+        self.marca(d["filasuman0"])
+        self.escribir("\n")
+
+        self.escribir("\nTRAZA\n", "titulo")
+        self.escribir(f"   tr(L) = {d['traza']}   (2 × {aristas} aristas = {2 * aristas})")
+        self.marca(d["traza"] == 2 * aristas)
+        self.escribir("\n")
+
+        self.escribir("\nESPECTRO DE L  (autovalores, método de Jacobi)\n", "titulo")
+        ev = d["autovalores"]
+        for k in range(0, len(ev), 4):
+            self.escribir("   ")
+            for i, v in enumerate(ev[k:k + 4], start=k + 1):
+                self.escribir(f"λ{i} = {v:8.4f}   ", "ok" if abs(v) < 1e-6 else None)
+            self.escribir("\n")
+        self.escribir(f"   suma de autovalores = {d['suma']:.4f} = tr(L)")
+        self.marca(abs(d["suma"] - d["traza"]) < 1e-6)
+        self.escribir("\n")
+
+        comp = len(d["comp"])
+        self.escribir("\nCOMPONENTES CONEXAS  (tres métodos independientes)\n", "titulo")
+        for nombre, valor in (("recorrido del grafo", comp),
+                              (f"n − rango(L) = {n} − {d['rango']}", n - d["rango"]),
+                              ("autovalores iguales a 0", d["ceros"])):
+            self.escribir(f"   {nombre:<28}{valor}")
+            self.marca(valor == comp)
+            self.escribir("\n")
+        for k, c in enumerate(d["comp"], start=1):
+            self.escribir(f"   componente {k}: {c}\n", "tenue")
+
+        self.reporte.config(state="disabled")
+        self.reporte.yview_moveto(0)
+
+
 # MAIN del "juego" / Programa
 class Juego:
     def __init__(self, raiz, matriz, puntajes):
@@ -349,6 +558,8 @@ class Juego:
         self.canvas = tk.Canvas(raiz, width=CW0, height=CH0, bg=FONDO,
                                 highlightthickness=0)
         self.canvas.grid(row=0, column=0, sticky="nsew")
+        Boton(self.canvas, "Matriz y análisis", self.abrir_analisis, fondo=FONDO, alto=34,
+              fuente=(FUENTE, 9, "bold")).place(x=14, y=8, width=150, height=34)
 
         self.lateral = tk.Frame(raiz, bg=SUPERFICIE, width=PANEL_W)
         self.lateral.grid(row=0, column=1, sticky="ns")
@@ -364,9 +575,11 @@ class Juego:
         self.canvas.bind("<Leave>", lambda e: self.poner_hover(None))
         raiz.bind("<space>", lambda e: self.alternar_auto())
         raiz.bind("<Control-e>", lambda e: self.exportar())
+        raiz.bind("<F2>", lambda e: self.abrir_analisis())
         raiz.bind("<F11>", lambda e: self.alternar_pantalla_completa())
         raiz.bind("<Escape>", lambda e: self.salir_pantalla_completa())
 
+        self.ventana_analisis = None
         self.cargar(matriz, puntajes)
         self.canvas.bind("<Configure>", self.al_cambiar_tamano)
         self.maximizar()
@@ -490,6 +703,17 @@ class Juego:
         self.ultimo_refresco = 0.0
         self.calcular_posiciones_x()
         self.dibujar()
+        v = self.ventana_analisis
+        if v is not None and v.winfo_exists():
+            v.mostrar()
+
+    def abrir_analisis(self):
+        v = self.ventana_analisis
+        if v is not None and v.winfo_exists():
+            v.lift()
+            v.focus_force()
+        else:
+            self.ventana_analisis = VentanaAnalisis(self)
 
     def cargar_archivo(self):
         ruta = filedialog.askopenfilename(initialdir=RAIZ / "data",
@@ -600,7 +824,7 @@ class Juego:
         # Ayuda de controles
         c.create_text(self.cw / 2, self.ch - 12,
                       text="Arrastrar nodo: cambiar puntaje   ·   Clic derecho: fijar / soltar"
-                           "   ·   Espacio: pausa   ·   F11: pantalla completa",
+                           "   ·   Espacio: pausa   ·   F2: análisis   ·   F11: pantalla completa",
                       fill="#4b5170", font=(FUENTE, 8))
 
         self.actualizar_panel()
@@ -615,8 +839,8 @@ class Juego:
             self.datos[clave].set(valor)
 
         ok = i["verificacion"]
-        self.verif.set("n − rango = componentes" if ok
-                       else " n − rango ≠ componentes", VERDE if ok else ROJO)
+        self.verif.set("✔  n − rango = componentes" if ok
+                       else "✘  n − rango ≠ componentes", VERDE if ok else ROJO)
         self.desarm.config(text=f"Desarmonía actual: {i['desarmonia']:.4f}")
 
         h = self.hover
